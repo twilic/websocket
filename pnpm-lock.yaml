@@ -15,8 +15,8 @@ importers:
         specifier: ^19.8.1
         version: 19.8.1
       '@twilic/core':
-        specifier: ^3.0.0
-        version: 3.1.0
+        specifier: ^3.2.0
+        version: file:../twilic/runtimes/javascript
       '@types/node':
         specifier: ^24.1.0
         version: 24.13.6
@@ -405,8 +405,8 @@ packages:
     resolution: {integrity: sha512-tlqY9xq5ukxTUZBmoOp+m61cqwQD5pHJtFY3Mn8CA8ps6yghLH/Hw8UPdqg4OLmFW3IFlcXnQNmo/dh8HzXYIQ==}
     engines: {node: '>=18'}
 
-  '@twilic/core@3.1.0':
-    resolution: {integrity: sha512-ZvqlmX2EQCglk6OFZcx8b30+mAOGLKYBeghUKaNMSXNK/NryfCQYKINqp4Xd4n+0dvIwJDjbdr1U5nGaDxufjw==}
+  '@twilic/core@file:../twilic/runtimes/javascript':
+    resolution: {directory: ../twilic/runtimes/javascript, type: directory}
     engines: {node: '>=24'}
 
   '@types/conventional-commits-parser@5.0.2':
@@ -1319,7 +1319,7 @@ snapshots:
 
   '@sindresorhus/merge-streams@4.0.0': {}
 
-  '@twilic/core@3.1.0': {}
+  '@twilic/core@file:../twilic/runtimes/javascript': {}
 
   '@types/conventional-commits-parser@5.0.2':
     dependencies:

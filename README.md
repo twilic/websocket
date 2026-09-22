@@ -31,7 +31,30 @@ One WebSocket message equals one Twilic frame. Send binary frames only (`opcode 
 
 In the browser, call `init({ prefer: "wasm" })` from `@twilic/core` before using these helpers.
 
-Stateful `encodePatch` sessions can send frames by injecting a custom codec. `@twilic/core` currently exposes session encode APIs; patch decode may require a matching session decoder in your language SDK.
+## Stateful profile
+
+Enable the Twilic WebSocket Stateful Profile so each connection keeps an independent outbound encoder and inbound decoder. Callers do not need to manage `encodePatch()` themselves:
+
+```ts
+import { init } from "@twilic/core";
+import { createTwilicWebSocket } from "@twilic/websocket";
+
+await init();
+
+const twilic = createTwilicWebSocket({
+  stateful: true,
+  session: { maxBaseSnapshots: 8 },
+});
+
+twilic.attach(socket, (value) => {
+  console.log(value);
+});
+
+twilic.send(socket, { x: 100, y: 200, hp: 100 });
+twilic.send(socket, { x: 101, y: 200, hp: 100 });
+```
+
+Reconnect opens a new directional session. Previous base snapshots are not inherited.
 
 ## API
 
@@ -40,7 +63,7 @@ Stateful `encodePatch` sessions can send frames by injecting a custom codec. `@t
 - `twilicSend(socket, value)`
 - `parseTwilicMessage(data, options?)`
 - `attachTwilicWebSocket(socket, listener, options?)`
-- `createTwilicWebSocket(codec?)`
+- `createTwilicWebSocket(codecOrOptions?)`
 - `TwilicMessageLimitError`
 - `TwilicUnsupportedFrameError`
 

@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- `createTwilicWebSocket({ stateful: true, session? })` for the Twilic WebSocket Stateful Profile: per-socket outbound `SessionEncoder` and inbound `SessionDecoder`, with `send()` always using `encodePatch()`.
+- Stateful `parseMessage` requires `options.socket` to select the inbound decoder.
+
+### Changed
+
+- Peer and dev dependency on `@twilic/core` is `^3.2.0` (`createSessionDecoder`). npm still serves `3.1.0`, so the lockfile resolves that range to the local package until `3.2.0` is published. Refresh the lockfile after publish.
+
 ## [0.1.0] - 2026-09-22
 
 Initial public release of `@twilic/websocket`.

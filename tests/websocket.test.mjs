@@ -168,3 +168,119 @@ test("attachTwilicWebSocket routes decode errors to onError", async () => {
     await server.close();
   }
 });
+
+test("stateful createTwilicWebSocket round-trips full then patch", async () => {
+  const { init } = await import("@twilic/core");
+  await init();
+
+  const twilic = createTwilicWebSocket({ stateful: true });
+  const server = await createEchoWebSocketServer();
+  try {
+    const socket = new WebSocket(server.url);
+    await onceOpen(socket);
+
+    const received = [];
+    const detach = twilic.attach(socket, (value) => {
+      received.push(value);
+    });
+
+    const base = { x: 100n, y: 200n, hp: 100n };
+    const next = { x: 101n, y: 200n, hp: 100n };
+
+    const firstEcho = onceMessage(socket);
+    twilic.send(socket, base);
+    const { data: firstData, isBinary: firstBinary } = await firstEcho;
+    assert.equal(firstBinary, true);
+    const firstBytes = Buffer.isBuffer(firstData)
+      ? firstData
+      : Buffer.from(firstData);
+    assert.notEqual(firstBytes[0], 0x0a);
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.deepEqual(received, [base]);
+
+    const secondEcho = onceMessage(socket);
+    twilic.send(socket, next);
+    const { data: secondData, isBinary: secondBinary } = await secondEcho;
+    assert.equal(secondBinary, true);
+    const secondBytes = Buffer.isBuffer(secondData)
+      ? secondData
+      : Buffer.from(secondData);
+    assert.equal(secondBytes[0], 0x0a);
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.deepEqual(received, [base, next]);
+
+    detach();
+    socket.close();
+  } finally {
+    await server.close();
+  }
+});
+
+test("stateful sessions are per-socket and do not inherit across reconnect", async () => {
+  const { init } = await import("@twilic/core");
+  await init();
+
+  const twilic = createTwilicWebSocket({ stateful: true });
+  const server = await createEchoWebSocketServer();
+  try {
+    const first = new WebSocket(server.url);
+    await onceOpen(first);
+
+    const base = { x: 1n, y: 2n, hp: 3n };
+    const next = { x: 4n, y: 2n, hp: 3n };
+
+    const firstEcho = onceMessage(first);
+    twilic.send(first, base);
+    const { data: fullData } = await firstEcho;
+    await twilic.parseMessage(fullData, { socket: first, isBinary: true });
+
+    const patchEcho = onceMessage(first);
+    twilic.send(first, next);
+    const { data: patchData } = await patchEcho;
+    const patchBytes = Buffer.isBuffer(patchData)
+      ? patchData
+      : Buffer.from(patchData);
+    assert.equal(patchBytes[0], 0x0a);
+
+    first.close();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    const second = new WebSocket(server.url);
+    await onceOpen(second);
+
+    await assert.rejects(
+      () =>
+        twilic.parseMessage(patchData, {
+          socket: second,
+          isBinary: true,
+        }),
+      /unknown reference|previous_message|stateless retry|invalid data/i
+    );
+
+    second.close();
+  } finally {
+    await server.close();
+  }
+});
+
+test("stateful parseMessage requires options.socket", async () => {
+  const twilic = createTwilicWebSocket({ stateful: true });
+  await assert.rejects(
+    () => twilic.parseMessage(new Uint8Array([0x00])),
+    /options\.socket/
+  );
+});
+
+test("createTwilicWebSocket rejects stateful with custom codec", () => {
+  assert.throws(
+    () =>
+      createTwilicWebSocket({
+        stateful: true,
+        encode: () => new Uint8Array(),
+        decode: () => null,
+      }),
+    /cannot combine stateful/
+  );
+});
