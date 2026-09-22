@@ -37,13 +37,17 @@ jobs:
           node-version: 24
           registry-url: https://registry.npmjs.org
 
+      - name: Allow the just-published core package
+        run: |
+          printf '%s\n' 'minimumReleaseAgeExclude:' '  - "@twilic/core@3.2.0"' > pnpm-workspace.yaml
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
       - name: Verify tag and package version
         run: |
           RELEASE_TAG="${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}"
-          node ./scripts/verify-tag-version.mjs "$RELEASE_TAG"
+          env -u GITHUB_REF_NAME node ./scripts/verify-tag-version.mjs "$RELEASE_TAG"
 
       - name: Run tests
         run: pnpm test
