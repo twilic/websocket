@@ -1,0 +1,2 @@
+minimumReleaseAgeExclude:
+  - '@twilic/core@3.2.0'
