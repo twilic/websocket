@@ -1,0 +1,59 @@
+name: Bug Report
+description: Report a bug
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: bug_description
+    attributes:
+      label: Bug Description
+      description: Briefly describe what happened.
+      placeholder: e.g. parseTwilicMessage rejects valid binary frames
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: Provide clear steps to reproduce the issue.
+      value: |
+        1. Step 1
+        2. Step 2
+        3. Step 3
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: Describe what should happen.
+      placeholder: e.g. Listener receives the decoded Twilic value
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Behavior
+      description: Describe what actually happens.
+      placeholder: e.g. TwilicUnsupportedFrameError is thrown
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Runtime version, OS, and package versions.
+      placeholder: |
+        - Node.js: 24.x
+        - @twilic/websocket: 0.1.0
+        - @twilic/core: 3.x
+        - OS: macOS 15
+    validations:
+      required: false
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Context
+      description: Logs, screenshots, or anything else that might help.
+    validations:
+      required: false

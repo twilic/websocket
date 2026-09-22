@@ -1,0 +1,23 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+## [0.1.0] - 2026-09-22
+
+Initial public release of `@twilic/websocket`.
+
+### Added
+
+- `TWILIC_CONTENT_TYPE` (`application/vnd.twilic`) constant.
+- `DEFAULT_MESSAGE_LIMIT` (1 MiB) for inbound frame size checks.
+- `twilicSend(socket, value)` helper to send Twilic-encoded binary frames.
+- `parseTwilicMessage(data, options?)` helper to decode inbound frames.
+- `attachTwilicWebSocket(socket, listener, options?)` helper that returns a detach function.
+- `createTwilicWebSocket(codec?)` factory for injectable encode/decode.
+- `TwilicMessageLimitError` and `TwilicUnsupportedFrameError`.
+- Node integration tests with `ws` echo server and global `WebSocket`.
+- CI workflows for format, lint, typecheck, tests, commitlint, and PR body validation.

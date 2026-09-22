@@ -1,0 +1,58 @@
+name: Publish NPM
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (example: v0.1.1)"
+        required: true
+
+jobs:
+  publish:
+    name: Publish to npm
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref }}
+
+      - name: Setup pnpm
+        uses: pnpm/setup@703c52620218391530e48b9e8870d5c0082e1b9b # v2.1.0
+        with:
+          version: 11.25.0
+          cache: true
+          install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify tag and package version
+        run: |
+          RELEASE_TAG="${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}"
+          node ./scripts/verify-tag-version.mjs "$RELEASE_TAG"
+
+      - name: Run tests
+        run: pnpm test
+
+      # Trusted publishing (OIDC): requires npm CLI >= 11.5.1 (see npm trusted-publishers docs).
+      # Configure the package on npmjs.com: Settings → Trusted Publisher → GitHub Actions
+      # (repository twilic/websocket, workflow file publish-npm.yml).
+      - name: Ensure npm CLI for OIDC trusted publishing
+        run: npm install -g "npm@^11.5.1"
+
+      - name: Publish to npm
+        run: npm publish --access public --provenance
