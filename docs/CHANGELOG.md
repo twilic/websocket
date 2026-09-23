@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- `TwilicWebSocket.reset(socket)` clears a stateful session's encoder and decoder. The next `send()` emits a full frame. Stateless profiles ignore `reset()`.
+- Stateful end-to-end coverage for full-then-patch, multiple patches, reset back to a full frame, reconnect as a new session, and decoder state remaining intact after a decode failure.
+
 ## [0.2.0] - 2026-09-22
 
 ### Added

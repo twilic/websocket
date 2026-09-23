@@ -97,6 +97,11 @@ export interface TwilicWebSocket<T = TwilicValue> {
     listener: (value: T) => void,
     options?: TwilicAttachOptions
   ) => () => void;
+  /**
+   * Drop session state for `socket`. Stateful profiles emit a full frame on
+   * the next `send()`. Stateless profiles ignore this call.
+   */
+  reset: (socket: TwilicSocket) => void;
 }
 
 export class TwilicMessageLimitError extends Error {
@@ -343,6 +348,14 @@ function createStatefulTwilicWebSocket<T = TwilicValue>(
         options
       );
     },
+    reset(socket) {
+      const pair = sessions.get(socket as object);
+      if (!pair) {
+        return;
+      }
+      pair.encoder.reset();
+      pair.decoder.reset();
+    },
   };
 }
 
@@ -373,6 +386,7 @@ export function createTwilicWebSocket<T = TwilicValue>(
         parseMessageWithCodec<T>(codecOrOptions, data, options),
       attach: (socket, listener, options) =>
         attachWithCodec<T>(codecOrOptions, socket, listener, options),
+      reset() {},
     };
   }
 
@@ -386,6 +400,7 @@ export function createTwilicWebSocket<T = TwilicValue>(
       parseMessageWithCodec<T>(defaultCodec, data, options),
     attach: (socket, listener, options) =>
       attachWithCodec<T>(defaultCodec, socket, listener, options),
+    reset() {},
   };
 }
 
