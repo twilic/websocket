@@ -19,17 +19,33 @@ export interface TwilicCodec {
 export interface TwilicWebSocketOptions {
   /** Enable the Twilic WebSocket Stateful Profile. Defaults to false. */
   stateful?: boolean;
-  /** Session options applied to per-socket encoder and decoder. */
+  /** Session options for this connection's encoder and decoder. */
   session?: SessionOptions;
+  /** Stateless codec. Cannot be combined with `stateful: true`. */
+  codec?: TwilicCodec;
+  /** Reject text frames when true. Defaults to true. */
+  requireBinary?: boolean;
+  /** Maximum message bytes. Defaults to 1 MiB. */
+  limit?: number;
+  /** Called when an inbound frame fails to decode. */
+  onError?: (error: unknown) => void;
 }
 
-/** Minimal send surface shared by the WebSocket API and `ws`. */
+/**
+ * Socket surface shared by the browser `WebSocket` and `ws`.
+ * Listener parameters stay wide so either event API is accepted directly.
+ */
 export interface TwilicSocket {
-  send: (
-    data: Uint8Array | ArrayBuffer,
-    options?: { binary?: boolean }
-  ) => void;
+  send(data: Uint8Array | ArrayBuffer, options?: { binary?: boolean }): void;
+  binaryType?: string;
+  on?(event: string, listener: (...args: any[]) => void): unknown;
+  off?(event: string, listener: (...args: any[]) => void): unknown;
+  addEventListener?(type: string, listener: (...args: any[]) => void): void;
+  removeEventListener?(type: string, listener: (...args: any[]) => void): void;
 }
+
+/** @deprecated Use {@link TwilicSocket}. Browser and `ws` sockets are both `TwilicSocket`. */
+export type TwilicEventSocket = TwilicSocket;
 
 export type TwilicMessageData =
   | ArrayBuffer
@@ -51,57 +67,21 @@ export interface TwilicMessageOptions {
   isBinary?: boolean;
   /** Maximum message bytes. Defaults to 1 MiB. */
   limit?: number;
-  /**
-   * Required for stateful `parseMessage`: selects the inbound decoder for this
-   * WebSocket. Stateless parse ignores this field.
-   */
-  socket?: TwilicSocket;
 }
 
 export interface TwilicAttachOptions extends TwilicMessageOptions {
   onError?: (error: unknown) => void;
 }
 
-export interface TwilicEventSocket extends TwilicSocket {
-  binaryType?: string;
-  on?: (
-    event: "message" | "close",
-    listener:
-      | ((data: TwilicMessageData, isBinary: boolean) => void)
-      | (() => void)
-  ) => unknown;
-  off?: (
-    event: "message" | "close",
-    listener:
-      | ((data: TwilicMessageData, isBinary: boolean) => void)
-      | (() => void)
-  ) => unknown;
-  addEventListener?: (
-    type: "message" | "close",
-    listener: ((event: MessageEvent) => void) | (() => void)
-  ) => void;
-  removeEventListener?: (
-    type: "message" | "close",
-    listener: ((event: MessageEvent) => void) | (() => void)
-  ) => void;
-}
-
 export interface TwilicWebSocket<T = TwilicValue> {
-  send: (socket: TwilicSocket, value: TwilicValue) => void;
+  /** Encode and send one frame. Returns the bytes written to the socket. */
+  send: (value: TwilicValue) => Uint8Array;
+  /** Decode inbound frames once and deliver the value. Returns an unsubscribe function. */
+  onMessage: (listener: (value: T) => void) => () => void;
   parseMessage: (
     data: TwilicMessageData,
     options?: TwilicMessageOptions
   ) => Promise<T>;
-  attach: (
-    socket: TwilicEventSocket,
-    listener: (value: T) => void,
-    options?: TwilicAttachOptions
-  ) => () => void;
-  /**
-   * Drop session state for `socket`. Stateful profiles emit a full frame on
-   * the next `send()`. Stateless profiles ignore this call.
-   */
-  reset: (socket: TwilicSocket) => void;
 }
 
 export class TwilicMessageLimitError extends Error {
@@ -175,22 +155,7 @@ function assertWithinLimit(bytes: Uint8Array, limit: number): void {
   }
 }
 
-function isTwilicCodec(value: unknown): value is TwilicCodec {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    typeof (value as TwilicCodec).encode === "function" &&
-    typeof (value as TwilicCodec).decode === "function" &&
-    !("stateful" in value)
-  );
-}
-
-function sendWithCodec(
-  codec: TwilicCodec,
-  socket: TwilicSocket,
-  value: TwilicValue
-): void {
-  const bytes = codec.encode(value);
+function sendBytes(socket: TwilicSocket, bytes: Uint8Array): void {
   socket.send(bytes, { binary: true });
 }
 
@@ -214,32 +179,25 @@ async function parseMessageWithCodec<T>(
   return codec.decode(bytes) as T;
 }
 
-function attachWithCodec<T>(
-  codec: TwilicCodec,
-  socket: TwilicEventSocket,
-  listener: (value: T) => void,
-  options?: TwilicAttachOptions
-): () => void {
-  messageLimit(options);
+function bindClose(socket: TwilicSocket, onClose: () => void): void {
+  if (typeof socket.on === "function") {
+    socket.on("close", onClose);
+    return;
+  }
+  socket.addEventListener?.("close", onClose);
+}
 
+function bindMessage(
+  socket: TwilicSocket,
+  onFrame: (data: TwilicMessageData, isBinary: boolean | undefined) => void
+): () => void {
   if (socket.binaryType !== undefined) {
     socket.binaryType = "arraybuffer";
   }
 
-  const handleError = (error: unknown) => {
-    if (options?.onError) {
-      options.onError(error);
-    }
-  };
-
   if (typeof socket.on === "function") {
     const onMessage = (data: TwilicMessageData, isBinary: boolean) => {
-      void parseMessageWithCodec<T>(codec, data, {
-        ...options,
-        isBinary,
-      })
-        .then(listener)
-        .catch(handleError);
+      onFrame(data, isBinary);
     };
     socket.on("message", onMessage);
     return () => {
@@ -252,13 +210,7 @@ function attachWithCodec<T>(
     typeof socket.removeEventListener === "function"
   ) {
     const onMessage = (event: MessageEvent) => {
-      void parseMessageWithCodec<T>(codec, event.data as TwilicMessageData, {
-        ...options,
-        isBinary:
-          options?.isBinary ?? inferIsBinary(event.data as TwilicMessageData),
-      })
-        .then(listener)
-        .catch(handleError);
+      onFrame(event.data as TwilicMessageData, undefined);
     };
     socket.addEventListener("message", onMessage);
     return () => {
@@ -271,92 +223,23 @@ function attachWithCodec<T>(
   );
 }
 
-function createStatefulTwilicWebSocket<T = TwilicValue>(
-  sessionOptions: SessionOptions = {}
-): TwilicWebSocket<T> {
-  const sessions = new WeakMap<object, SessionPair>();
-
-  const getSession = (socket: TwilicSocket): SessionPair => {
-    const key = socket as object;
-    let pair = sessions.get(key);
-    if (!pair) {
-      pair = {
-        encoder: createSessionEncoder(sessionOptions),
-        decoder: createSessionDecoder(sessionOptions),
-      };
-      sessions.set(key, pair);
-    }
-    return pair;
-  };
-
-  const discardSession = (socket: TwilicSocket): void => {
-    const key = socket as object;
-    const pair = sessions.get(key);
-    if (!pair) {
-      return;
-    }
-    pair.encoder.reset();
-    pair.decoder.reset();
-    sessions.delete(key);
-  };
-
-  const bindClose = (socket: TwilicEventSocket): void => {
-    const onClose = () => {
-      discardSession(socket);
-    };
-    if (typeof socket.on === "function") {
-      socket.on("close", onClose);
-      return;
-    }
-    socket.addEventListener?.("close", onClose);
-  };
-
-  return {
-    send(socket, value) {
-      const { encoder } = getSession(socket);
-      const bytes = encoder.encodePatch(value);
-      socket.send(bytes, { binary: true });
-    },
-    parseMessage(data, options) {
-      if (!options?.socket) {
-        return Promise.reject(
-          new TypeError(
-            "stateful parseMessage requires options.socket for the inbound session decoder"
-          )
-        );
-      }
-      const { decoder } = getSession(options.socket);
-      return parseMessageWithCodec<T>(
-        {
-          encode,
-          decode: (bytes) => decoder.decode(bytes),
-        },
-        data,
-        options
-      );
-    },
-    attach(socket, listener, options) {
-      bindClose(socket);
-      const { decoder } = getSession(socket);
-      return attachWithCodec<T>(
-        {
-          encode,
-          decode: (bytes) => decoder.decode(bytes),
-        },
-        socket,
-        listener,
-        options
-      );
-    },
-    reset(socket) {
-      const pair = sessions.get(socket as object);
-      if (!pair) {
-        return;
-      }
-      pair.encoder.reset();
-      pair.decoder.reset();
-    },
-  };
+function attachWithCodec<T>(
+  codec: TwilicCodec,
+  socket: TwilicSocket,
+  listener: (value: T) => void,
+  options?: TwilicAttachOptions
+): () => void {
+  messageLimit(options);
+  return bindMessage(socket, (data, isBinary) => {
+    void parseMessageWithCodec<T>(codec, data, {
+      ...options,
+      isBinary,
+    })
+      .then(listener)
+      .catch((error: unknown) => {
+        options?.onError?.(error);
+      });
+  });
 }
 
 const defaultCodec: TwilicCodec = {
@@ -364,48 +247,110 @@ const defaultCodec: TwilicCodec = {
   decode,
 };
 
+type _Assert<T extends true> = T;
+type _SocketsFit = _Assert<
+  import("ws").WebSocket extends TwilicSocket
+    ? WebSocket extends TwilicSocket
+      ? true
+      : false
+    : false
+>;
+
 export function createTwilicWebSocket<T = TwilicValue>(
-  codecOrOptions: TwilicCodec | TwilicWebSocketOptions = defaultCodec
+  socket: TwilicSocket,
+  options: TwilicWebSocketOptions = {}
 ): TwilicWebSocket<T> {
-  if (
-    typeof codecOrOptions === "object" &&
-    codecOrOptions !== null &&
-    "stateful" in codecOrOptions &&
-    codecOrOptions.stateful === true &&
-    typeof (codecOrOptions as TwilicCodec).encode === "function"
-  ) {
+  if (typeof socket?.send !== "function") {
+    throw new TypeError(
+      "createTwilicWebSocket(socket, options?) requires a WebSocket"
+    );
+  }
+
+  if (options.stateful === true && options.codec) {
     throw new TypeError(
       "createTwilicWebSocket cannot combine stateful: true with a custom codec"
     );
   }
 
-  if (isTwilicCodec(codecOrOptions)) {
-    return {
-      send: (socket, value) => sendWithCodec(codecOrOptions, socket, value),
-      parseMessage: (data, options) =>
-        parseMessageWithCodec<T>(codecOrOptions, data, options),
-      attach: (socket, listener, options) =>
-        attachWithCodec<T>(codecOrOptions, socket, listener, options),
-      reset() {},
-    };
-  }
+  messageLimit(options);
 
-  if (codecOrOptions.stateful === true) {
-    return createStatefulTwilicWebSocket<T>(codecOrOptions.session ?? {});
-  }
+  const codec = options.codec ?? defaultCodec;
+  const session: SessionPair | null =
+    options.stateful === true
+      ? {
+          encoder: createSessionEncoder(options.session ?? {}),
+          decoder: createSessionDecoder(options.session ?? {}),
+        }
+      : null;
+
+  const activeCodec = (): TwilicCodec => {
+    if (!session) {
+      return codec;
+    }
+    return {
+      encode: (value) => session.encoder.encodePatch(value),
+      decode: (bytes) => session.decoder.decode(bytes),
+    };
+  };
+
+  bindClose(socket, () => {
+    session?.encoder.reset();
+    session?.decoder.reset();
+  });
+
+  const listeners = new Set<(value: T) => void>();
+  let stopListening: (() => void) | undefined;
+
+  const ensureListening = (): void => {
+    if (stopListening) {
+      return;
+    }
+    stopListening = bindMessage(socket, (data, isBinary) => {
+      void parseMessageWithCodec<T>(activeCodec(), data, {
+        requireBinary: options.requireBinary,
+        limit: options.limit,
+        isBinary,
+      })
+        .then((value) => {
+          for (const listener of listeners) {
+            listener(value);
+          }
+        })
+        .catch((error: unknown) => {
+          options.onError?.(error);
+        });
+    });
+  };
 
   return {
-    send: (socket, value) => sendWithCodec(defaultCodec, socket, value),
-    parseMessage: (data, options) =>
-      parseMessageWithCodec<T>(defaultCodec, data, options),
-    attach: (socket, listener, options) =>
-      attachWithCodec<T>(defaultCodec, socket, listener, options),
-    reset() {},
+    send(value) {
+      const bytes = activeCodec().encode(value);
+      sendBytes(socket, bytes);
+      return bytes;
+    },
+    onMessage(listener) {
+      listeners.add(listener);
+      ensureListening();
+      return () => {
+        listeners.delete(listener);
+        if (listeners.size === 0) {
+          stopListening?.();
+          stopListening = undefined;
+        }
+      };
+    },
+    parseMessage(data, parseOptions) {
+      return parseMessageWithCodec<T>(activeCodec(), data, {
+        requireBinary: parseOptions?.requireBinary ?? options.requireBinary,
+        limit: parseOptions?.limit ?? options.limit,
+        isBinary: parseOptions?.isBinary,
+      });
+    },
   };
 }
 
 export function twilicSend(socket: TwilicSocket, value: TwilicValue): void {
-  sendWithCodec(defaultCodec, socket, value);
+  sendBytes(socket, defaultCodec.encode(value));
 }
 
 export function parseTwilicMessage<T = TwilicValue>(
@@ -416,7 +361,7 @@ export function parseTwilicMessage<T = TwilicValue>(
 }
 
 export function attachTwilicWebSocket<T = TwilicValue>(
-  socket: TwilicEventSocket,
+  socket: TwilicSocket,
   listener: (value: T) => void,
   options?: TwilicAttachOptions
 ): () => void {

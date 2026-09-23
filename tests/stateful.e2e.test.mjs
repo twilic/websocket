@@ -112,24 +112,25 @@ function createInbox() {
 
 async function sendFrame(twilic, socket, value) {
   const echoed = onceMessage(socket);
-  twilic.send(socket, value);
+  twilic.send(value);
   const { data, isBinary } = await echoed;
   assert.equal(isBinary, true);
   return frameBytes(data);
 }
 
 test("stateful full frame is followed by a patch", async () => {
-  const twilic = createTwilicWebSocket({ stateful: true });
   const server = await createEchoWebSocketServer();
   try {
     const socket = new WebSocket(server.url);
     await onceOpen(socket);
     const inbox = createInbox();
-    const detach = twilic.attach(socket, (value) => inbox.push(value), {
+    const twilic = createTwilicWebSocket(socket, {
+      stateful: true,
       onError(error) {
         inbox.fail(error);
       },
     });
+    const detach = twilic.onMessage((value) => inbox.push(value));
 
     const base = { x: 100n, y: 200n, hp: 100n };
     const next = { x: 101n, y: 200n, hp: 100n };
@@ -154,17 +155,18 @@ test("stateful full frame is followed by a patch", async () => {
 });
 
 test("stateful session applies several patches in order", async () => {
-  const twilic = createTwilicWebSocket({ stateful: true });
   const server = await createEchoWebSocketServer();
   try {
     const socket = new WebSocket(server.url);
     await onceOpen(socket);
     const inbox = createInbox();
-    const detach = twilic.attach(socket, (value) => inbox.push(value), {
+    const twilic = createTwilicWebSocket(socket, {
+      stateful: true,
       onError(error) {
         inbox.fail(error);
       },
     });
+    const detach = twilic.onMessage((value) => inbox.push(value));
 
     const frames = [
       { x: 100n, y: 200n, hp: 100n },
@@ -194,75 +196,24 @@ test("stateful session applies several patches in order", async () => {
   }
 });
 
-test("stateful reset makes the next frame a full snapshot", async () => {
-  const twilic = createTwilicWebSocket({ stateful: true });
-  const server = await createEchoWebSocketServer();
-  try {
-    const socket = new WebSocket(server.url);
-    await onceOpen(socket);
-    const inbox = createInbox();
-    const detach = twilic.attach(socket, (value) => inbox.push(value), {
-      onError(error) {
-        inbox.fail(error);
-      },
-    });
-
-    const base = { x: 100n, y: 200n, hp: 100n };
-    const patched = { x: 101n, y: 200n, hp: 100n };
-    const restarted = { x: 1n, y: 2n, hp: 3n };
-    const afterRestart = { x: 2n, y: 2n, hp: 3n };
-
-    await sendFrame(twilic, socket, base);
-    await inbox.untilValues(1);
-    const patch = await sendFrame(twilic, socket, patched);
-    assert.equal(patch[0], STATE_PATCH);
-    await inbox.untilValues(2);
-
-    twilic.reset(socket);
-
-    await assert.rejects(
-      () => twilic.parseMessage(patch, { socket, isBinary: true }),
-      /unknown reference|previous_message|stateless retry|invalid data/i
-    );
-    await assert.rejects(
-      () => twilic.parseMessage(patch, { socket, isBinary: true }),
-      /unknown reference|previous_message|stateless retry|invalid data/i
-    );
-
-    const full = await sendFrame(twilic, socket, restarted);
-    assert.notEqual(full[0], STATE_PATCH);
-    await inbox.untilValues(3);
-
-    const nextPatch = await sendFrame(twilic, socket, afterRestart);
-    assert.equal(nextPatch[0], STATE_PATCH);
-    await inbox.untilValues(4);
-
-    assert.deepEqual(inbox.values, [base, patched, restarted, afterRestart]);
-    assert.deepEqual(inbox.errors, []);
-
-    detach();
-    socket.close();
-  } finally {
-    await server.close();
-  }
-});
-
 test("stateful reconnect opens a new session", async () => {
-  const twilic = createTwilicWebSocket({ stateful: true });
   const server = await createEchoWebSocketServer();
   try {
     const first = new WebSocket(server.url);
     await onceOpen(first);
     const firstInbox = createInbox();
-    const detachFirst = twilic.attach(first, (value) => firstInbox.push(value));
+    const firstTwilic = createTwilicWebSocket(first, { stateful: true });
+    const detachFirst = firstTwilic.onMessage((value) =>
+      firstInbox.push(value)
+    );
 
     const base = { x: 1n, y: 2n, hp: 3n };
     const next = { x: 4n, y: 2n, hp: 3n };
 
-    const full = await sendFrame(twilic, first, base);
+    const full = await sendFrame(firstTwilic, first, base);
     assert.notEqual(full[0], STATE_PATCH);
     await firstInbox.untilValues(1);
-    const patch = await sendFrame(twilic, first, next);
+    const patch = await sendFrame(firstTwilic, first, next);
     assert.equal(patch[0], STATE_PATCH);
     await firstInbox.untilValues(2);
     assert.deepEqual(firstInbox.values, [base, next]);
@@ -275,27 +226,27 @@ test("stateful reconnect opens a new session", async () => {
     const second = new WebSocket(server.url);
     await onceOpen(second);
     const secondInbox = createInbox();
-    const detachSecond = twilic.attach(
-      second,
-      (value) => secondInbox.push(value),
-      {
-        onError(error) {
-          secondInbox.fail(error);
-        },
-      }
+    const secondTwilic = createTwilicWebSocket(second, {
+      stateful: true,
+      onError(error) {
+        secondInbox.fail(error);
+      },
+    });
+    const detachSecond = secondTwilic.onMessage((value) =>
+      secondInbox.push(value)
     );
 
     await assert.rejects(
-      () => twilic.parseMessage(patch, { socket: second, isBinary: true }),
+      () => secondTwilic.parseMessage(patch, { isBinary: true }),
       /unknown reference|previous_message|stateless retry|invalid data/i
     );
 
     const freshBase = { x: 10n, y: 20n, hp: 30n };
     const freshNext = { x: 11n, y: 20n, hp: 30n };
-    const freshFull = await sendFrame(twilic, second, freshBase);
+    const freshFull = await sendFrame(secondTwilic, second, freshBase);
     assert.notEqual(freshFull[0], STATE_PATCH);
     await secondInbox.untilValues(1);
-    const freshPatch = await sendFrame(twilic, second, freshNext);
+    const freshPatch = await sendFrame(secondTwilic, second, freshNext);
     assert.equal(freshPatch[0], STATE_PATCH);
     await secondInbox.untilValues(2);
 
@@ -310,17 +261,18 @@ test("stateful reconnect opens a new session", async () => {
 });
 
 test("stateful decode failure does not break decoder state", async () => {
-  const twilic = createTwilicWebSocket({ stateful: true });
   const server = await createEchoWebSocketServer();
   try {
     const socket = new WebSocket(server.url);
     await onceOpen(socket);
     const inbox = createInbox();
-    const detach = twilic.attach(socket, (value) => inbox.push(value), {
+    const twilic = createTwilicWebSocket(socket, {
+      stateful: true,
       onError(error) {
         inbox.fail(error);
       },
     });
+    const detach = twilic.onMessage((value) => inbox.push(value));
 
     const base = { x: 100n, y: 200n, hp: 100n };
     const first = { x: 101n, y: 200n, hp: 100n };

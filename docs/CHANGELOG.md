@@ -6,10 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** `createTwilicWebSocket(socket, options?)` binds one WebSocket. `send(value)` returns the encoded bytes, and `onMessage(listener)` decodes inbound frames for that socket. Browser `WebSocket` and `ws` are accepted directly.
+- Stateful mode keeps the encoder and decoder on the connection. Closing the socket ends the session. The next connection starts with a full frame.
+
 ### Added
 
-- `TwilicWebSocket.reset(socket)` clears a stateful session's encoder and decoder. The next `send()` emits a full frame. Stateless profiles ignore `reset()`.
-- Stateful end-to-end coverage for full-then-patch, multiple patches, reset back to a full frame, reconnect as a new session, and decoder state remaining intact after a decode failure.
+- Stateful end-to-end coverage for full-then-patch, multiple patches, reconnect as a new session, and decoder state remaining intact after a decode failure.
 
 ## [0.2.0] - 2026-09-22
 

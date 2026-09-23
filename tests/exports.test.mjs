@@ -29,10 +29,9 @@ test("named exports are functions and error classes", () => {
   assert.equal(typeof TwilicUnsupportedFrameError, "function");
 });
 
-test("createTwilicWebSocket returns send, parseMessage, attach, and reset", () => {
-  const twilic = createTwilicWebSocket();
+test("createTwilicWebSocket returns send, onMessage, and parseMessage", () => {
+  const twilic = createTwilicWebSocket({ send() {} });
   assert.equal(typeof twilic.send, "function");
+  assert.equal(typeof twilic.onMessage, "function");
   assert.equal(typeof twilic.parseMessage, "function");
-  assert.equal(typeof twilic.attach, "function");
-  assert.equal(typeof twilic.reset, "function");
 });

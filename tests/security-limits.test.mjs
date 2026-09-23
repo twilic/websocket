@@ -4,19 +4,25 @@ import { test } from "node:test";
 import {
   DEFAULT_MESSAGE_LIMIT,
   TwilicMessageLimitError,
+  attachTwilicWebSocket,
   createTwilicWebSocket,
   parseTwilicMessage,
 } from "../dist/index.js";
 
 test("message limits reject before decoding and accept exact boundary", async () => {
   let decodeCalls = 0;
-  const twilic = createTwilicWebSocket({
-    encode: () => new Uint8Array(),
-    decode: (bytes) => {
-      decodeCalls += 1;
-      return bytes.byteLength;
-    },
-  });
+  const twilic = createTwilicWebSocket(
+    { send() {} },
+    {
+      codec: {
+        encode: () => new Uint8Array(),
+        decode: (bytes) => {
+          decodeCalls += 1;
+          return bytes.byteLength;
+        },
+      },
+    }
+  );
 
   await assert.rejects(
     () => twilic.parseMessage(new Uint8Array(5), { limit: 4 }),
@@ -42,12 +48,15 @@ test("message limits reject before decoding and accept exact boundary", async ()
 
 test("invalid message limits fail at configuration", async () => {
   for (const limit of [-1, 1.5, Infinity, NaN]) {
-    await assert.rejects(
-      () => createTwilicWebSocket().parseMessage(new Uint8Array(), { limit }),
+    assert.throws(
+      () => createTwilicWebSocket({ send() {} }, { limit }),
       RangeError
     );
     assert.throws(
-      () => createTwilicWebSocket().attach({ send() {} }, () => {}, { limit }),
+      () =>
+        attachTwilicWebSocket({ send() {} }, () => {}, {
+          limit,
+        }),
       RangeError
     );
   }

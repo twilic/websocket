@@ -74,7 +74,7 @@ test("parseTwilicMessage rejects text frames by default", async () => {
 
 test("parseTwilicMessage allows text when requireBinary is false", async () => {
   const codec = createJsonCodec();
-  const twilic = createTwilicWebSocket(codec);
+  const twilic = createTwilicWebSocket({ send() {} }, { codec });
   const decoded = await twilic.parseMessage(JSON.stringify({ ok: true }), {
     requireBinary: false,
   });
@@ -83,14 +83,14 @@ test("parseTwilicMessage allows text when requireBinary is false", async () => {
 
 test("createTwilicWebSocket uses injected codec", async () => {
   const codec = createTrackingCodec();
-  const twilic = createTwilicWebSocket(codec);
   const server = await createEchoWebSocketServer();
   try {
     const socket = new WebSocket(server.url);
     await onceOpen(socket);
+    const twilic = createTwilicWebSocket(socket, { codec });
 
     const messagePromise = onceMessage(socket);
-    twilic.send(socket, { tracked: true });
+    twilic.send({ tracked: true });
     const { data, isBinary } = await messagePromise;
     await twilic.parseMessage(data, { isBinary });
 
@@ -104,21 +104,21 @@ test("createTwilicWebSocket uses injected codec", async () => {
   }
 });
 
-test("attachTwilicWebSocket delivers decoded values and supports detach", async () => {
+test("onMessage delivers decoded values and supports detach", async () => {
   const codec = createJsonCodec();
-  const twilic = createTwilicWebSocket(codec);
   const server = await createEchoWebSocketServer();
   try {
     const socket = new WebSocket(server.url);
     await onceOpen(socket);
+    const twilic = createTwilicWebSocket(socket, { codec });
 
     const received = [];
-    const detach = twilic.attach(socket, (value) => {
+    const detach = twilic.onMessage((value) => {
       received.push(value);
     });
 
     const first = onceMessage(socket);
-    twilic.send(socket, { n: 1 });
+    twilic.send({ n: 1 });
     await first;
     await new Promise((resolve) => setTimeout(resolve, 20));
     assert.deepEqual(received, [{ n: 1 }]);
@@ -126,7 +126,7 @@ test("attachTwilicWebSocket delivers decoded values and supports detach", async 
     detach();
 
     const second = onceMessage(socket);
-    twilic.send(socket, { n: 2 });
+    twilic.send({ n: 2 });
     await second;
     await new Promise((resolve) => setTimeout(resolve, 20));
     assert.deepEqual(received, [{ n: 1 }]);
@@ -173,14 +173,14 @@ test("stateful createTwilicWebSocket round-trips full then patch", async () => {
   const { init } = await import("@twilic/core");
   await init();
 
-  const twilic = createTwilicWebSocket({ stateful: true });
   const server = await createEchoWebSocketServer();
   try {
     const socket = new WebSocket(server.url);
     await onceOpen(socket);
+    const twilic = createTwilicWebSocket(socket, { stateful: true });
 
     const received = [];
-    const detach = twilic.attach(socket, (value) => {
+    const detach = twilic.onMessage((value) => {
       received.push(value);
     });
 
@@ -188,7 +188,7 @@ test("stateful createTwilicWebSocket round-trips full then patch", async () => {
     const next = { x: 101n, y: 200n, hp: 100n };
 
     const firstEcho = onceMessage(socket);
-    twilic.send(socket, base);
+    twilic.send(base);
     const { data: firstData, isBinary: firstBinary } = await firstEcho;
     assert.equal(firstBinary, true);
     const firstBytes = Buffer.isBuffer(firstData)
@@ -200,7 +200,7 @@ test("stateful createTwilicWebSocket round-trips full then patch", async () => {
     assert.deepEqual(received, [base]);
 
     const secondEcho = onceMessage(socket);
-    twilic.send(socket, next);
+    twilic.send(next);
     const { data: secondData, isBinary: secondBinary } = await secondEcho;
     assert.equal(secondBinary, true);
     const secondBytes = Buffer.isBuffer(secondData)
@@ -218,26 +218,26 @@ test("stateful createTwilicWebSocket round-trips full then patch", async () => {
   }
 });
 
-test("stateful sessions are per-socket and do not inherit across reconnect", async () => {
+test("stateful sessions do not inherit across reconnect", async () => {
   const { init } = await import("@twilic/core");
   await init();
 
-  const twilic = createTwilicWebSocket({ stateful: true });
   const server = await createEchoWebSocketServer();
   try {
     const first = new WebSocket(server.url);
     await onceOpen(first);
+    const firstTwilic = createTwilicWebSocket(first, { stateful: true });
 
     const base = { x: 1n, y: 2n, hp: 3n };
     const next = { x: 4n, y: 2n, hp: 3n };
 
     const firstEcho = onceMessage(first);
-    twilic.send(first, base);
+    firstTwilic.send(base);
     const { data: fullData } = await firstEcho;
-    await twilic.parseMessage(fullData, { socket: first, isBinary: true });
+    await firstTwilic.parseMessage(fullData, { isBinary: true });
 
     const patchEcho = onceMessage(first);
-    twilic.send(first, next);
+    firstTwilic.send(next);
     const { data: patchData } = await patchEcho;
     const patchBytes = Buffer.isBuffer(patchData)
       ? patchData
@@ -249,13 +249,10 @@ test("stateful sessions are per-socket and do not inherit across reconnect", asy
 
     const second = new WebSocket(server.url);
     await onceOpen(second);
+    const secondTwilic = createTwilicWebSocket(second, { stateful: true });
 
     await assert.rejects(
-      () =>
-        twilic.parseMessage(patchData, {
-          socket: second,
-          isBinary: true,
-        }),
+      () => secondTwilic.parseMessage(patchData, { isBinary: true }),
       /unknown reference|previous_message|stateless retry|invalid data/i
     );
 
@@ -265,22 +262,42 @@ test("stateful sessions are per-socket and do not inherit across reconnect", asy
   }
 });
 
-test("stateful parseMessage requires options.socket", async () => {
-  const twilic = createTwilicWebSocket({ stateful: true });
-  await assert.rejects(
-    () => twilic.parseMessage(new Uint8Array([0x00])),
-    /options\.socket/
-  );
+test("createTwilicWebSocket accepts a browser WebSocket directly", async () => {
+  const server = await createEchoWebSocketServer();
+  try {
+    const socket = new globalThis.WebSocket(server.url);
+    await onceOpen(socket);
+    const twilic = createTwilicWebSocket(socket);
+    const received = [];
+    twilic.onMessage((value) => {
+      received.push(value);
+    });
+
+    const echoed = onceMessage(socket);
+    twilic.send({ ok: true });
+    await echoed;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.deepEqual(received, [{ ok: true }]);
+
+    socket.close();
+  } finally {
+    await server.close();
+  }
 });
 
 test("createTwilicWebSocket rejects stateful with custom codec", () => {
   assert.throws(
     () =>
-      createTwilicWebSocket({
-        stateful: true,
-        encode: () => new Uint8Array(),
-        decode: () => null,
-      }),
+      createTwilicWebSocket(
+        { send() {} },
+        {
+          stateful: true,
+          codec: {
+            encode: () => new Uint8Array(),
+            decode: () => null,
+          },
+        }
+      ),
     /cannot combine stateful/
   );
 });
