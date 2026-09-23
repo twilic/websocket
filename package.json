@@ -41,8 +41,8 @@
     "lint": "oxlint src tests",
     "lint:fix": "oxlint --fix src tests",
     "typecheck": "tsc --noEmit",
-    "test": "pnpm build && node --test --test-concurrency=1 \"tests/**/*.test.mjs\"",
-    "prepack": "pnpm build",
+    "test": "bun run build && node --test --test-concurrency=1 \"tests/**/*.test.mjs\"",
+    "prepack": "bun run build",
     "release:check": "node ./scripts/verify-tag-version.mjs",
     "prepare": "husky"
   },
@@ -65,5 +65,5 @@
   "engines": {
     "node": ">=24"
   },
-  "packageManager": "pnpm@11.25.0"
+  "packageManager": "bun@1.4.2"
 }

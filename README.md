@@ -5,7 +5,7 @@ WebSocket helpers for Twilic binary frames.
 ## Install
 
 ```bash
-pnpm add @twilic/websocket @twilic/core
+bun add @twilic/websocket @twilic/core
 ```
 
 ## Usage
@@ -70,8 +70,8 @@ Closing the socket ends the session. A new socket needs a new `createTwilicWebSo
 ## Runnable example
 
 ```bash
-pnpm example:websocket          # server from twilic/examples
-pnpm example:websocket:client   # client from twilic/examples
+bun run example:websocket          # server from twilic/examples
+bun run example:websocket:client   # client from twilic/examples
 ```
 
 See [`websocket-session/`](https://github.com/twilic/examples/tree/main/websocket-session).
